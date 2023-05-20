@@ -9,6 +9,7 @@ import {Owned} from "solmate/auth/Owned.sol";
 import {SSTORE2} from "solmate/utils/SSTORE2.sol";
 
 import {SS2ERC721, ERC721TokenReceiver, ERC721} from "src/SS2ERC721.sol";
+import {SBT_SS2ERC721} from "src/SBT_SS2ERC721.sol";
 
 contract ERC721Recipient is ERC721TokenReceiver {
     address public operator;
@@ -58,7 +59,6 @@ contract ReferenceERC721 is ERC721 {
 abstract contract MockERC721 is SS2ERC721 {
     constructor(string memory _name, string memory _symbol) SS2ERC721(_name, _symbol) {}
 
-
     /*//////////////////////////////////////////////////////////////
                              MUST OVERRIDE
     //////////////////////////////////////////////////////////////*/
@@ -66,7 +66,6 @@ abstract contract MockERC721 is SS2ERC721 {
     function safeMint(address to, bytes memory data) public virtual;
 
     function mint(address to) public virtual;
-
 
     /*//////////////////////////////////////////////////////////////
                                 HELPERS
@@ -92,11 +91,249 @@ abstract contract MockERC721 is SS2ERC721 {
     }
 }
 
+abstract contract SBT_MockERC721 is SBT_SS2ERC721 {
+    constructor(string memory _name, string memory _symbol) SBT_SS2ERC721(_name, _symbol) {}
+
+    /*//////////////////////////////////////////////////////////////
+                             MUST OVERRIDE
+    //////////////////////////////////////////////////////////////*/
+
+    function safeMint(address to, bytes memory data) public virtual;
+
+    function mint(address to) public virtual;
+
+    /*//////////////////////////////////////////////////////////////
+                                HELPERS
+    //////////////////////////////////////////////////////////////*/
+
+    function tokenURI(uint256) public pure virtual override returns (string memory) {}
+
+    function safeMintToPointer(address pointer, bytes memory data) public {
+        _safeMint(pointer, data);
+    }
+
+    function safeMint(address to) public virtual {
+        safeMint(to, "");
+    }
+}
 
 contract NonERC721Recipient {}
 
 abstract contract ERC721ImplProvider {
     function getERC721Impl(string memory name, string memory symbol) public virtual returns (MockERC721);
+}
+
+abstract contract SBT_ERC721ImplProvider {
+    function getERC721Impl(string memory name, string memory symbol) public virtual returns (SBT_MockERC721);
+}
+
+/// @notice Test suite for ERC721 based on solmate's
+abstract contract SBT_ERC721Test is Test, SBT_ERC721ImplProvider {
+    event Transfer(address indexed from, address indexed to, uint256 indexed id);
+    event Approval(address indexed owner, address indexed spender, uint256 indexed id);
+    event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
+
+    SBT_MockERC721 token;
+    ReferenceERC721 referenceERC721;
+
+    address happyRecipient;
+    address nonRecipient;
+    address revertingRecipient;
+    address wrongReturnDataRecipient;
+
+    function setUp() public virtual {
+        token = getERC721Impl("Token", "TKN");
+        referenceERC721 = new ReferenceERC721();
+        happyRecipient = address(new ERC721Recipient());
+        nonRecipient = address(new NonERC721Recipient());
+        revertingRecipient = address(new RevertingERC721Recipient());
+        wrongReturnDataRecipient = address(new WrongReturnDataERC721Recipient());
+    }
+
+    function bound_min(address a, uint256 min) internal view returns (address) {
+        return address(uint160(bound(uint160(a), min, type(uint160).max)));
+    }
+
+    /// @dev a value strictly greater than min_addr
+    function bound_min(address a, address min_addr) internal view returns (address) {
+        uint256 min = uint160(min_addr) + 1;
+        return bound_min(a, min);
+    }
+
+    function invariantMetadata() public {
+        assertEq(token.name(), "Token");
+        assertEq(token.symbol(), "TKN");
+    }
+
+    function testMint() public {
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(address(0), address(0xBEEF), 1);
+
+        token.mint(address(0xBEEF));
+
+        assertEq(token.balanceOf(address(0xBEEF)), 1);
+        assertEq(token.ownerOf(1), address(0xBEEF));
+    }
+
+    function testApprove() public {
+        token.mint(address(this));
+
+        vm.expectEmit(true, true, true, true);
+        emit Approval(address(this), address(0xBEEF), 1);
+
+        token.approve(address(0xBEEF), 1);
+
+        assertEq(token.getApproved(1), address(0xBEEF));
+    }
+
+    function testApproveAll() public {
+        vm.expectEmit(true, true, true, true);
+        emit ApprovalForAll(address(this), address(0xBEEF), true);
+
+        token.setApprovalForAll(address(0xBEEF), true);
+
+        assertTrue(token.isApprovedForAll(address(this), address(0xBEEF)));
+    }
+
+    function test_mint_toZero_reverts() public {
+        vm.expectRevert("ADDRESSES_NOT_SORTED");
+        token.mint(address(0));
+    }
+
+    function test_approve_unauthorized_reverts() public {
+        token.mint(address(0xCAFE));
+
+        vm.expectRevert("NOT_AUTHORIZED");
+        token.approve(address(0xBEEF), 1);
+    }
+
+    function test_transferFrom_SBT_reverts() public {
+        token.mint(address(this));
+
+        vm.expectRevert("NOT_AUTHORIZED");
+        token.transferFrom(address(this), address(0xBEEF), 1);
+    }
+
+    function test_safeTransferFrom_SBT_reverts() public {
+        token.mint(address(this));
+
+        vm.expectRevert("NOT_AUTHORIZED");
+        token.safeTransferFrom(address(this), address(0xBEEF), 1);
+    }
+
+    function test_safeTransferFrom_data_SBT_reverts() public {
+        token.mint(address(this));
+
+        vm.expectRevert("NOT_AUTHORIZED");
+        token.safeTransferFrom(address(this), address(0xBEEF), 1, "testing 123");
+    }
+
+    function test_safeTransferFrom_toNonERC721Recipient_reverts() public {
+        token.mint(address(this));
+
+        vm.expectRevert();
+        token.safeTransferFrom(address(this), nonRecipient, 1);
+    }
+
+    function test_ownerOf_unminted_reverts() public {
+        vm.expectRevert("NOT_MINTED");
+        token.ownerOf(1337);
+
+        token.mint(address(this));
+
+        vm.expectRevert("NOT_MINTED");
+        token.ownerOf(1337);
+    }
+
+    function testMetadata(string memory name, string memory symbol) public {
+        SBT_MockERC721 tkn = getERC721Impl(name, symbol);
+
+        assertEq(tkn.name(), name);
+        assertEq(tkn.symbol(), symbol);
+    }
+
+    function testMint(address to) public {
+        vm.assume(to != address(0));
+
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(address(0), to, 1);
+
+        token.mint(to);
+        assertEq(token.ownerOf(1), to);
+        assertEq(token.balanceOf(to), 1);
+    }
+
+    function testBalanceOfBeforeMint(address owner) public {
+        vm.assume(owner != address(0));
+        assertEq(token.balanceOf(owner), 0);
+    }
+
+    function testApprove(address to) public {
+        token.mint(address(this));
+
+        vm.expectEmit(true, true, true, true);
+        emit Approval(address(this), to, 1);
+        token.approve(to, 1);
+
+        assertEq(token.getApproved(1), to);
+    }
+
+    function testApproveAll(address to, bool approved) public {
+        vm.expectEmit(true, true, true, true);
+        emit ApprovalForAll(address(this), to, approved);
+
+        token.setApprovalForAll(to, approved);
+
+        assertEq(token.isApprovedForAll(address(this), to), approved);
+    }
+
+    function test_approve_unminted_reverts_reference(uint256 id, address to) public {
+        vm.expectRevert("NOT_AUTHORIZED");
+        referenceERC721.approve(to, id);
+    }
+
+    function test_approve_unminted_reverts(uint256 id, address to) public {
+        // vm.assume(id != 0);
+        vm.expectRevert("NOT_AUTHORIZED");
+        token.approve(to, id);
+    }
+
+    function test_approve_unauthorized_reverts(address owner, address to) public {
+        vm.assume(owner > address(0));
+        vm.assume(owner != address(this));
+
+        token.mint(owner);
+
+        vm.expectRevert("NOT_AUTHORIZED");
+        token.approve(to, 1);
+    }
+
+    function test_safeMint_toNonERC721RecipientWithData_reverts(bytes calldata data) public {
+        vm.expectRevert("UNSAFE_RECIPIENT");
+        token.safeMint(nonRecipient, data);
+    }
+
+    function test_safeMint_toRevertingERC721RecipientWithData(bytes calldata data) public {
+        vm.expectRevert("NO_THANKS");
+        token.safeMint(revertingRecipient, data);
+    }
+
+    function test_safeMint_toERC721RecipientWithWrongReturnDataWithData(bytes calldata data) public {
+        vm.expectRevert("UNSAFE_RECIPIENT");
+        token.safeMint(wrongReturnDataRecipient, data);
+    }
+
+    function test_ownerOf_unminted_reverts(uint256 id) public {
+        vm.assume(id != 1);
+
+        vm.expectRevert("NOT_MINTED");
+        token.ownerOf(id);
+
+        token.mint(address(this));
+
+        vm.expectRevert("NOT_MINTED");
+        token.ownerOf(id);
+    }
 }
 
 /// @notice Test suite for ERC721 based on solmate's
@@ -697,6 +934,7 @@ abstract contract ERC721Test is Test, ERC721ImplProvider {
         assertEq(token.ownerOf(1), to);
         assertEq(token.balanceOf(to), 1);
     }
+
     function testSafeMintToERC721RecipientWithData(bytes calldata data) public {
         ERC721Recipient to = ERC721Recipient(happyRecipient);
 

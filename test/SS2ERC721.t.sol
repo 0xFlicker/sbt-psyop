@@ -7,13 +7,12 @@ import {SSTORE2} from "solmate/utils/SSTORE2.sol";
 
 import {SS2ERC721} from "src/SS2ERC721.sol";
 
-import {ERC721Test, MockERC721} from "test/ERC721Test.t.sol";
+import {SBT_SS2ERC721} from "src/SBT_SS2ERC721.sol";
+
+import {ERC721Test, MockERC721, SBT_ERC721Test, SBT_MockERC721} from "test/ERC721Test.t.sol";
 
 contract MockERC721CalldataMinter is MockERC721 {
-    constructor(
-        string memory _name,
-        string memory _symbol
-    ) MockERC721(_name, _symbol)  {}
+    constructor(string memory _name, string memory _symbol) MockERC721(_name, _symbol) {}
 
     function mint(bytes calldata addresses) public {
         _mint(addresses);
@@ -31,8 +30,41 @@ contract MockERC721CalldataMinter is MockERC721 {
     }
 }
 
+contract SBT_MockERC721CalldataMinter is SBT_MockERC721 {
+    constructor(string memory _name, string memory _symbol) SBT_MockERC721(_name, _symbol) {}
+
+    function mint(bytes calldata addresses) public {
+        _mint(addresses);
+    }
+
+    function safeMint(address addr1, bytes memory data) public override {
+        // note: there is no safeMint calldata version
+        address pointer = SSTORE2.write(abi.encodePacked(addr1));
+        _safeMint(pointer, data);
+    }
+
+    function mint(address to) public override {
+        // create a new call frame
+        SBT_MockERC721CalldataMinter(address(this)).mint(abi.encodePacked(to));
+    }
+}
+
 contract MockERC721PointerMinter is MockERC721 {
     constructor(string memory _name, string memory _symbol) MockERC721(_name, _symbol) {}
+
+    function safeMint(address to, bytes memory data) public override {
+        address pointer = SSTORE2.write(abi.encodePacked(to));
+        _safeMint(pointer, data);
+    }
+
+    function mint(address to) public override {
+        address pointer = SSTORE2.write(abi.encodePacked(to));
+        _mint(pointer);
+    }
+}
+
+contract SBT_MockERC721PointerMinter is SBT_MockERC721 {
+    constructor(string memory _name, string memory _symbol) SBT_MockERC721(_name, _symbol) {}
 
     function safeMint(address to, bytes memory data) public override {
         address pointer = SSTORE2.write(abi.encodePacked(to));
@@ -58,5 +90,21 @@ contract SS2ERC721Calldata is ERC721Test {
 contract SS2ERC721Pointer is ERC721Test {
     function getERC721Impl(string memory name, string memory symbol) public virtual override returns (MockERC721) {
         return new MockERC721PointerMinter(name, symbol);
+    }
+}
+
+/// @notice Test suite for ERC721 based on solmate's
+/// @dev specifically test SS2ERC721._mint(bytes calldata addresses)
+contract SBT_SS2ERC721Calldata is SBT_ERC721Test {
+    function getERC721Impl(string memory name, string memory symbol) public virtual override returns (SBT_MockERC721) {
+        return new SBT_MockERC721CalldataMinter(name, symbol);
+    }
+}
+
+/// @notice Test suite for ERC721 based on solmate's
+/// @dev specifically test SS2ERC721._mint(address pointer)
+contract SBT_SS2ERC721Pointer is SBT_ERC721Test {
+    function getERC721Impl(string memory name, string memory symbol) public virtual override returns (SBT_MockERC721) {
+        return new SBT_MockERC721PointerMinter(name, symbol);
     }
 }

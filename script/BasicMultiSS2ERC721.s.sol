@@ -41,7 +41,7 @@ contract BasicERC721Script is Script, StdAssertions {
         // 8 full batches of 1228 tokens + 1 batch of 176 tokens
         // gas used 7660933 + 7652066 + 7652066 + 7652066 + 7652078 + 7652066 + 7652066 + 7652066 + 1171038 = 62396445
         // cost per mint = 6240
-        assertEq(mint(token, 10000), 10000);
+        assertEq(mint(token, 8160), 8160);
 
         vm.stopBroadcast();
     }

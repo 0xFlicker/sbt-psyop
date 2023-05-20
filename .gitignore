@@ -18,3 +18,8 @@ docs/
 
 # ignore all of broadcast, this is a library
 broadcast/
+node_modules
+artifacts
+typechain-types
+wagmi
+yarn-error.log
