@@ -16,6 +16,12 @@ export default defineConfig({
             [mainnet.id]: "0x3007083EAA95497cD6B2b809fB97B6A30bdF53D3",
           },
         },
+        {
+          name: "AirDrop",
+          address: {
+            [mainnet.id]: "0x2c952eE289BbDB3aEbA329a4c41AE4C836bcc231",
+          },
+        },
       ],
     }),
   ],

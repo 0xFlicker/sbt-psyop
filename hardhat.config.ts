@@ -10,22 +10,42 @@ import "dotenv/config";
 import { envEtherscanApiKey, envMnemonic, envRpc } from "./utils/env";
 import { HardhatUserConfig, task } from "hardhat/config";
 import { runTypeChain, glob } from "typechain";
-import { psyopABI } from "./wagmi/generated";
+import { psyopABI, airDropABI } from "./wagmi/generated";
 import { collectPsyopAllowedAddresses } from "./script/collectPsyopAllowedAddresses";
-
+import {
+  collectPsyopAirdropAddresses,
+  statsOnAirdrop,
+} from "./script/collectPsyopAirdropAddresses";
+import { v4 as uuidv4 } from "uuid";
 import os from "os";
 import path from "path";
 
-task("psyop:typechain", "generate Psyop typechain types", async (_, hre) => {
+const extraAbi = [
+  {
+    abi: psyopABI,
+    filename: "Psyop.json",
+  },
+  {
+    abi: airDropABI,
+    filename: "AirDrop.json",
+  },
+];
+task("wagmi:typechain", "generate Psyop typechain types", async (_, hre) => {
   // write ABI to tmp file
-  const tmpDir = path.join(os.tmpdir(), "psyop-abi");
+  const uuid = uuidv4();
+  const tmpDir = path.join(os.tmpdir(), `abi-${uuid}`);
   fs.mkdirSync(tmpDir, { recursive: true });
-  const tmpFile = path.join(tmpDir, "psyop.json");
-  fs.writeFileSync(tmpFile, JSON.stringify(psyopABI));
+  const abiFiles = await Promise.all(
+    extraAbi.map(async (abi) => {
+      const filename = path.join(tmpDir, abi.filename);
+      await fs.promises.writeFile(filename, JSON.stringify(abi.abi));
+      return filename;
+    })
+  );
   const result = await runTypeChain({
     cwd: hre.config.paths.root,
-    filesToProcess: [tmpFile],
-    allFiles: [tmpFile],
+    filesToProcess: abiFiles,
+    allFiles: abiFiles,
     outDir: "typechain-types",
     target: "ethers-v6",
   });
@@ -37,6 +57,37 @@ task("psyop:allowedAddresses", "collect allowed addresses", async (_, hre) => {
   const allowedAddresses = await collectPsyopAllowedAddresses(hre);
   console.log("Allowed addresses:");
   console.log(allowedAddresses.join("\n"));
+});
+
+task("psyop:presale", "collect addresses", async (_, hre) => {
+  const { ethers } = hre;
+  const presaleAddresses = await collectPsyopAirdropAddresses(hre);
+  const csv: [string, string][] = [];
+  const stats = statsOnAirdrop(presaleAddresses);
+  console.log(`Total addresses: ${stats.count}`);
+  console.log(
+    `Total amount: ${Number(ethers.formatUnits(stats.total, 18)).toFixed(0)}`
+  );
+  console.log(
+    `Min amount: ${Number(ethers.formatUnits(stats.min, 18)).toFixed(0)}`
+  );
+  console.log(
+    `Max amount: ${Number(ethers.formatUnits(stats.max, 18)).toFixed(0)}`
+  );
+  console.log(
+    `Average amount: ${Number(ethers.formatUnits(stats.avg, 18)).toFixed(0)}`
+  );
+  console.log(
+    `Median amount: ${Number(ethers.formatUnits(stats.median, 18)).toFixed(0)}`
+  );
+
+  for (const [address, amount] of presaleAddresses) {
+    // const removedDecimal = amount / 10n ** 18n;
+    // divide by 10**18 to get the number of tokens, but keep 2 decimal places
+    const formattedNumber = ethers.formatUnits(amount, 18);
+    csv.push([address, formattedNumber]);
+  }
+  fs.writeFileSync("presale.csv", csv.map((row) => row.join(",")).join("\n"));
 });
 
 export default {
